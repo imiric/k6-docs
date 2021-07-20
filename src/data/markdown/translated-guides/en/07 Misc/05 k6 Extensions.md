@@ -146,13 +146,135 @@ Note that you'll need to specify the binary in the current directory (i.e. `./k6
 
 ### Writing a new extension
 
-A good starting point for using xk6 and writing your own extension is the [xk6
-introductory article](https://k6.io/blog/extending-k6-with-xk6).
-<!-- TODO: How much of this article do we want to reproduce here? -->
+The first thing you should do before starting work on a new extension is to confirm
+that a similar extension doesn't already exist for your use case. Take a look at
+the [Ecosystem page](/ecosystem) and the [`xk6` topic on GitHub](https://github.com/topics/xk6).
+For example, if a system you need support for can be tested with a generic protocol
+like MQTT, prefer using [xk6-mqtt](https://github.com/pmalhaire/xk6-mqtt)
+instead of creating an extension that uses some custom protocol.
 
-You'll first need to decide the type of extension you wish to create. Choose a
-JavaScript extension if you want to extend the JS functionality of your script, or an
-Output extension if you want to process the metrics emitted by k6 in some way.
+Next, you should decide the type of extension you need. A JavaScript extension is a
+good fit if you want to extend the JS functionality of your script, or add support
+for a new network protocol to test with. An Output extension would be more suitable
+if you need to process the metrics emitted by k6 in some way, submit them to a
+specific storage backend that was previously unsupported, etc. The k6 APIs you'll
+need to use and things to consider while developing will be different in each case.
+
+
+#### Writing a new JavaScript extension
+
+A good starting point for using xk6 and writing a JS extension is the [xk6
+introductory article](https://k6.io/blog/extending-k6-with-xk6), but we'll cover
+some of the details here.
+
+JavaScript extensions consist of a main module struct that exposes methods that
+can be called from JavaScript. For example:
+
+<CodeGroup labels={["compare.go"]} lineNumbers={[false]}>
+
+```go
+package compare
+
+type Compare struct{}
+
+func (*Compare) IsGreater(int a, b) bool {
+	return a > b
+}
+```
+
+</CodeGroup>
+
+In order to use this from k6 test scripts we need to register the module
+by adding the following:
+
+<CodeGroup labels={["compare.go"]} lineNumbers={[false]}>
+
+```go
+import "go.k6.io/k6/js/modules"
+
+func init() {
+	modules.Register("k6/x/compare", new(Compare))
+}
+```
+
+</CodeGroup>
+
+Note that all k6 extensions should have the `k6/x/` prefix and the short name
+must be unique among all extensions built in the same k6 binary.
+
+We can then build a k6 binary with this extension by running
+`xk6 build --with xk6-compare=.`.
+
+Finally we can use the extension in a test script:
+
+<CodeGroup labels={["test.js"]} lineNumbers={[true]}>
+
+```go
+import compare from 'k6/x/compare';
+
+export default function () {
+  console.log(compare.isGreater(2, 1));
+}
+```
+
+</CodeGroup>
+
+And run the test with `./k6 run test.js`, which should output `INFO[0000] true`.
+
+Note that we have to specify the binary we just built in the current directory
+(`./k6`), as otherwise some other `k6` binary found on the system could be executed
+which might not have the extension built-in. This is only the case on Linux and
+macOS, as Windows shells will execute the binary in the current directory first.
+
+
+##### Additional features
+
+The k6 Go-JS bridge has a few features we should mention:
+
+- Go method names will be converted from Pascal case to Camel case when
+  accessed in JS, as in the example above: `IsGreater` becomes `isGreater`.
+
+- Similarly, Go field names will be converted from Pascal case to Snake case.
+  For example, the struct field `SomeField string` is accessible in JS
+  as the `some_field` object property. This behavior is configurable with the
+  `js` struct tag, so this can be changed with `SomeField string ``js:"someField"```
+  or the field can be hidden with `js:"-"`.
+
+- Method names prefixed with `X` are interpreted as constructors in JS,
+  and will support the `new` operator.
+  For example, defining the following method on the above struct:
+
+<CodeGroup labels={["compare.go"]} lineNumbers={[false]}>
+
+```go
+func (*Compare) XComparator() *Comparator {
+	return &Comparator{}
+}
+```
+
+</CodeGroup>
+
+  Would allow creating a `Comparator` instance in JS with `new compare.Comparator()`,
+  which is a bit more idiomatic to JS.
+
+- Methods that specify `context.Context` or `*context.Context` as the first
+  argument will be passed the `Context` instance used internally in k6,
+  which has attached some useful objects for inspecting the internal execution
+  state, such as
+  [`lib.State`](https://github.com/grafana/k6/blob/v0.33.0/lib/state.go#L43)
+  or VU state, [`lib.ExecutionState`](https://github.com/grafana/k6/blob/v0.33.0/lib/execution.go#L142),
+  and the [`goja.Runtime`](https://github.com/dop251/goja/blob/705acef95ba3654f89c969d9e792ac5f49215350/runtime.go#L162) instance
+  that's executing the VU that called the method.
+  This feature is used extensively in the
+  [`xk6-execution`](https://github.com/grafana/xk6-execution) extension.
+
+<!-- TODO: Mention common.Bind() here? HasModuleInstancePerVU? -->
+
+
+##### Things to keep in mind
+
+
+
 
 A few things to keep in mind when writing a new extension:
 <!-- TODO: Better structure this list? -->
