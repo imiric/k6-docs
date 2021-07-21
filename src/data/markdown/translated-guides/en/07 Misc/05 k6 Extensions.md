@@ -273,6 +273,17 @@ func (*Compare) XComparator() *Comparator {
 
 ##### Things to keep in mind
 
+When developing a JavaScript extension for k6 it's good to keep the following in mind......:
+
+- The code in the `default` function (or another function specified by
+  [`exec`](/using-k6/scenarios/#common-options)) will be executed many
+  times during a test run and possibly in parallel by thousands of VUs.
+  As such any operation of your extension meant to run in that context
+  needs to be performant and [thread-safe](https://en.wikipedia.org/wiki/Thread_safety).
+- You should do any heavy initialization in the [`init`
+  context](/javascript-api/init-context/), just keep in mind that memory
+  isn't shared across VUs and each VU will have a different copy
+  of any objects initialized there.
 
 
 
