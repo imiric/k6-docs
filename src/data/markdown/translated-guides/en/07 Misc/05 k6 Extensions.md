@@ -168,7 +168,9 @@ introductory article](https://k6.io/blog/extending-k6-with-xk6), but we'll cover
 some of the details here.
 
 JavaScript extensions consist of a main module struct that exposes methods that
-can be called from JavaScript. For example:
+can be called from a k6 test script. For example:
+
+<!-- TODO: A better trivial example? -->
 
 <CodeGroup labels={["compare.go"]} lineNumbers={[false]}>
 
@@ -203,7 +205,9 @@ Note that all k6 extensions should have the `k6/x/` prefix and the short name
 must be unique among all extensions built in the same k6 binary.
 
 We can then build a k6 binary with this extension by running
-`xk6 build --with xk6-compare=.`.
+`xk6 build --with xk6-compare=.`. In this case `xk6-compare` is the
+Go module name passed to `go mod init`, but in a real-world scenario
+this would be a URL.
 
 Finally we can use the extension in a test script:
 
@@ -229,7 +233,7 @@ macOS, as Windows shells will execute the binary in the current directory first.
 
 ##### Additional features
 
-The k6 Go-JS bridge has a few features we should mention:
+The k6 Go-JS bridge has a few features we should highlight:
 
 - Go method names will be converted from Pascal case to Camel case when
   accessed in JS, as in the example above: `IsGreater` becomes `isGreater`.
@@ -264,7 +268,7 @@ func (*Compare) XComparator() *Comparator {
   [`lib.State`](https://github.com/grafana/k6/blob/v0.33.0/lib/state.go#L43)
   or VU state, [`lib.ExecutionState`](https://github.com/grafana/k6/blob/v0.33.0/lib/execution.go#L142),
   and the [`goja.Runtime`](https://github.com/dop251/goja/blob/705acef95ba3654f89c969d9e792ac5f49215350/runtime.go#L162) instance
-  that's executing the VU that called the method.
+  the VU is using to execute the script.
   This feature is used extensively in the
   [`xk6-execution`](https://github.com/grafana/xk6-execution) extension.
 
@@ -272,8 +276,6 @@ func (*Compare) XComparator() *Comparator {
 
 
 ##### Things to keep in mind
-
-When developing a JavaScript extension for k6 it's good to keep the following in mind......:
 
 - The code in the `default` function (or another function specified by
   [`exec`](/using-k6/scenarios/#common-options)) will be executed many
