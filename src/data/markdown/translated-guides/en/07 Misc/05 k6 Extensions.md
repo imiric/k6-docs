@@ -83,12 +83,8 @@ samples from k6, and are able to do any processing or further dispatching.
 Some examples include: [xk6-prometheus](https://github.com/szkiba/xk6-prometheus)
 and [xk6-influxdbv2](https://github.com/li-zhixin/xk6-influxdbv2).
 
----
 
-<!-- There used to be a "Getting started" h2 here, but I removed it to reduce the -->
-<!-- header nesting, as h5s aren't styled, and to make the index on the right -->
-<!-- more useful. -->
-<!-- Maybe we should split this into a separate page, "Using xk6"? -->
+## Getting started
 
 There are two ways in which xk6 can be used:
 
@@ -100,7 +96,9 @@ There are two ways in which xk6 can be used:
   and maintain a public repository for the extension that keeps up to date with any
   breaking API changes while xk6 is being stabilized.
 
-
+<!-- This used to be an h3 (nested under "Getting Started"), but h5s aren't styled -->
+<!-- properly and the right side index doesn't show sections above h2, so this is -->
+<!-- at the same level now. :-/ -->
 ## Using xk6 to build a k6 binary
 
 You might have found a neat k6 extension on the [Ecosystem page](/ecosystem) or on
@@ -288,10 +286,12 @@ func (*Compare) XComparator() *Comparator {
   times during a test run and possibly in parallel by thousands of VUs.
   As such any operation of your extension meant to run in that context
   needs to be performant and [thread-safe](https://en.wikipedia.org/wiki/Thread_safety).
-- You should do any heavy initialization in the [`init`
-  context](/javascript-api/init-context/), just keep in mind that memory
-  isn't shared across VUs and each VU will have a different copy
-  of any objects initialized there.
+- Any heavy initialization should be done in the [`init`
+  context](/javascript-api/init-context/)...
+- Custom metric emission can be done by creating new metrics using
+  [`stats.New()`](https://github.com/grafana/k6/blob/v0.33.0/stats/stats.go#L449)
+  and emitting them using [`stats.PushIfNotDone()`](https://github.com/grafana/k6/blob/v0.33.0/stats/stats.go#L429).
+  For an example of this see the [`xk6-remote-write` extension](https://github.com/dgzlopes/xk6-remote-write).
 
 
 ### Writing a new Output extension
@@ -315,11 +315,12 @@ import (
 	"go.k6.io/k6/stats"
 )
 
+// Register the extension on module initialization.
 func init() {
 	output.RegisterExtension("logger", New)
 }
 
-// Logger outputs k6 metric samples to stdout.
+// Logger writes k6 metric samples to stdout.
 type Logger struct {
 	out io.Writer
 }
@@ -346,9 +347,7 @@ func (l *Logger) AddMetricSamples(samples []stats.SampleContainer) {
 	for i := range samples {
 		all := samples[i].GetSamples()
 		for j := range all {
-			io.WriteString(l.out, fmt.Sprintf("%d %s: %f\n",
-				all[j].Time.UnixNano(), all[j].Metric.Name, all[j].Value),
-			)
+			fmt.Fprintf(l.out, "%d %s: %f\n", all[j].Time.UnixNano(), all[j].Metric.Name, all[j].Value)
 		}
 	}
 }
@@ -361,61 +360,34 @@ func (*Logger) Stop() error {
 
 </CodeGroup>
 
-Notice a few things:
+Notice a couple of things:
 
 - The module initializer `New()` receives an instance of
   [`output.Params`](https://github.com/grafana/k6/blob/v0.33.0/output/types.go#L36).
   With this object the extension can access the output-specific configuration,
-  interfaces to the filesystem, stdout and stderr, and more.
+  interfaces to the filesystem, synchronized stdout and stderr, and more.
 - `AddMetricSamples` in this example simply writes to stdout. In a real-world
   scenario this output might have to be buffered and flushed periodically to avoid
   memory leaks. Below we'll discuss some helpers you can use for that.
 
 
-
-
 #### Additional features
+
+- Output structs can optionally implement additional interfaces that allows them to
+  [receive thresholds](https://github.com/grafana/k6/blob/v0.33.0/output/types.go#L79),
+  [test run status updates](https://github.com/grafana/k6/blob/v0.33.0/output/types.go#L94)
+  or [interrupt a test run](https://github.com/grafana/k6/blob/v0.33.0/output/types.go#L88).
+- Because output implementations typically need to process large amounts of data that
+  k6 produces and dispatch it to another system, we've provided a couple of helper
+  structs you can use in your extensions:
+  [`output.SampleBuffer`](https://github.com/grafana/k6/blob/v0.33.0/output/helpers.go#L35)
+  is a thread-safe buffer for metric samples to help with memory management and
+  [`output.PeriodicFlusher`](https://github.com/grafana/k6/blob/v0.33.0/output/helpers.go#L75)
+  will periodically run a function which is useful for flushing or dispatching the
+  buffered samples.
+  For usage examples see the [`statsd` output](https://github.com/k6io/k6/blob/v0.33.0/output/statsd/output.go#L55).
+
 
 #### Things to keep in mind
 
-A few things to keep in mind when writing a new extension:
-<!-- TODO: Better structure this list? -->
-
-- JS extensions are registered using
-  [`modules.Register()`](https://pkg.go.dev/go.k6.io/k6@v0.33.0/js/modules#Register)
-  and Output extensions using
-  [`output.RegisterExtension()`](https://pkg.go.dev/go.k6.io/k6@v0.33.0/output#RegisterExtension),
-  which should be called in the `init()` function of the module.
-  In either case you'll have to specify a unique name that preferably doesn't clash
-  with any existing extension. JS extensions also must begin with `k6/x/` so as to
-  differentiate them from built-in JS modules.
-
-- JS extensions expose Go methods which can optionally receive a
-  [`context.Context`](https://golang.org/pkg/context/#Context) instance as the first argument.
-  This context is used throughout the k6 codebase and contains embedded objects
-  which can be extracted to access the
-  [`goja.Runtime`](https://pkg.go.dev/github.com/dop251/goja#Runtime) for a
-  particular VU, and to get more information about the test in progress.
-  Take a look at
-  [`common.GetRuntime()`](https://pkg.go.dev/go.k6.io/k6@v0.33.0/js/common#GetRuntime),
-  [`lib.GetState()`](https://pkg.go.dev/go.k6.io/k6@v0.33.0/lib#GetState) and
-  [`lib.GetExecutionState()`](https://pkg.go.dev/go.k6.io/k6@v0.33.0/lib#GetExecutionState).
-
-- Output extensions must implement the
-  [`output.Output`](https://pkg.go.dev/go.k6.io/k6@v0.33.0/output#Output) interface.
-  They should be particularly weary of performance, since they can receive a large
-  amount of metrics to process, which can easily degrade the performance of the test
-  if the extension is inefficient.
-  As such you should ensure that `AddMetricSamples()` doesn't block for a long time,
-  and that metrics are flushed periodically to avoid memory leaks.
-
-  Since this is common functionality that most outputs should have, we've provided
-  a couple of helper structs: [`output.SampleBuffer`](https://pkg.go.dev/go.k6.io/k6@v0.33.0/output#SampleBuffer)
-  and [`output.PeriodicFlusher`](https://pkg.go.dev/go.k6.io/k6@v0.33.0/output#PeriodicFlusher)
-  that output implementations can use which handles bufferring and periodic
-  flushing in a thread-safe way.
-  For usage examples see the [`statsd` output](https://github.com/k6io/k6/blob/v0.33.0/output/statsd/output.go#L55).
-
-- Custom metric emission can be done by creating new metrics using [`stats.New()`](https://pkg.go.dev/go.k6.io/k6@v0.33.0/stats#New)
-  and emitting them using [`stats.PushIfNotDone()`](https://pkg.go.dev/go.k6.io/k6@v0.33.0/stats#PushIfNotDone).
-  For an example of this see the [`xk6-remote-write` extension](https://github.com/dgzlopes/xk6-remote-write).
+- ...
